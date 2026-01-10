@@ -1,0 +1,1 @@
+# Scan-texte-extension-chrome
