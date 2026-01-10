@@ -9,6 +9,7 @@
 */
 
 const API_URL = "https://noninquiring-uniformly-krish.ngrok-free.dev/analyze";
+chrome.storage.local.set({ apiKey: "ndAnPZTLY32KMCwSADQUdPM" });
 
 let state = {
     isScanning: false,
