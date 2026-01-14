@@ -35,10 +35,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]  # ← Ajoute ça
+    expose_headers=["*"]
 )
 
-# Ajoute une fonction pour forcer les headers CORS
 @app.middleware("http")
 async def add_cors_headers(request: Request, call_next):
     response = await call_next(request)
@@ -47,7 +46,6 @@ async def add_cors_headers(request: Request, call_next):
     response.headers["Access-Control-Allow-Headers"] = "*"
     return response
 
-# Ajoute un handler pour OPTIONS (preflight)
 @app.options("/analyze")
 async def options_analyze():
     return JSONResponse(
@@ -70,10 +68,9 @@ async def analyze(payload: Payload, x_api_key: Optional[str] = Header(None)):
     data = payload.data
     data_type = payload.dataType
 
-    # Conversion en string
     if data_type == 'json':
         data_str = json.dumps(data, ensure_ascii=False, indent=2)
-    else:  # html, text, etc.
+    else: 
         data_str = str(data)
 
     print(f"\n{'='*60}")
@@ -81,35 +78,26 @@ async def analyze(payload: Payload, x_api_key: Optional[str] = Header(None)):
     print(f"[CAPTURE] SOURCE: {url}")
     print(f"[CAPTURE] TAILLE:  {len(data_str)} chars")
     print(f"[CAPTURE] APERÇU:")
-    print(data_str[: 800])  # Affiche plus pour debug
+    print(data_str[: 800]) 
     print(f"{'='*60}\n")
 
-    # Vérification API Key
     if x_api_key != API_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    # 🔥 DÉTECTION AMÉLIORÉE :  Ne skip que les pages vraiment inutiles
     useless_keywords = ['loading', 'modal', 'template', 'navigation', 'menu', 'header', 'footer']
     if all(keyword not in data_str.lower() for keyword in ['question', 'exercise', 'problem', 'task', 'implement', 'write', 'create', 'function', 'class', 'code']):
-        # Si aucun mot-clé pertinent → probable que c'est inutile
         if any(uk in data_str.lower() for uk in useless_keywords) and len(data_str) < 1000:
             print(f"[VIGILE] Page inutile détectée -> R.A.S")
             return {"result": "R.A.S"}
 
-    # Troncature
-    limit = 5000  # Réduit pour éviter la surcharge
+    limit = 5000 
     if len(data_str) > limit:
         print(f"[WARN] Données TRONQUÉES ({len(data_str)} > {limit})")
         data_str = data_str[:limit] + "\n\n[... CONTENU TRONQUÉ]"
 
     print(f"[IA] Envoi à {MODEL_NAME}...")
 
-    # 🔥 PROMPT UNIVERSEL AMÉLIORÉ
-    # Prompt "Chirurgical" - Optimisé pour Qwen/Ollama
-    # Prompt "Chercheur d'Or" - Analyse Sémantique (Pas de lignes fixes)
-    # Prompt "Clean Print" - Affiche les résultats proprement via des print()
-    # Prompt "Solveur Autonome" - Génère la solution depuis zéro
-    # Prompt "Développeur Dynamique" - Force l'IA à coder la logique, pas le résultat
+    #YOU HAVE TO MAKE YOUR OWN PROMPT !! Here an example
     prompt = f"""
     [RÔLE]
     Tu es un développeur Python Senior qui passe un test technique automatisé.
@@ -172,8 +160,6 @@ async def analyze(payload: Payload, x_api_key: Optional[str] = Header(None)):
             print(f"\n[IA] RÉPONSE ({len(ai_text)} chars):")
             print(ai_text[:500])
             print("\n")
-           
-            # Si réponse trop courte ou vide
             if len(ai_text) < 5:
                 return {"result": "R.A.S"}
            
@@ -184,7 +170,7 @@ async def analyze(payload: Payload, x_api_key: Optional[str] = Header(None)):
             return {"result": f"Erreur: {str(e)}"}
 
 if __name__ == "__main__":
-    print("[🚀 SERVER] Démarrage sur http://0.0.0.0:5000")
-    print(f"[🤖 IA] Modèle: {MODEL_NAME}")
-    print(f"[🔑 API] Clé requise: {API_SECRET}\n")
+    print("[SERVER] Démarrage sur http://0.0.0.0:5000")
+    print(f"[IA] Modèle: {MODEL_NAME}")
+    print(f"[API] Clé requise: {API_SECRET}\n")
     uvicorn.run(app, host="0.0.0.0", port=5000)
