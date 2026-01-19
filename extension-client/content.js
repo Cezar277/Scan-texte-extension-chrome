@@ -5,7 +5,7 @@
 ** Alias le16
 **
 **
-** Last update: 10/01/2026
+** Last update: 19/01/2026
 */
 
 const API_URL = "https://noninquiring-uniformly-krish.ngrok-free.dev/analyze";
@@ -13,11 +13,15 @@ chrome.storage.local.set({ apiKey: "ndAnPZTLY32KMCwSADQUdPM" });
 
 let state = {
     isScanning: false,
-    apiKey: null
+    apiKey: null,
+    isVisible: true
 };
 
 let lastSentHash = null;        
 let isWaitingForResponse = false;
+let buttonExecuteElement = null;
+let shadowRoot = null;
+let hostElement = null;
 
 function fastHash(str) {
     let hash = 5381;
@@ -27,9 +31,10 @@ function fastHash(str) {
 }
 
 const initPromise = new Promise(resolve => {
-    chrome.storage.local.get(['isScanning', 'apiKey'], (res) => {
+    chrome.storage.local.get(['isScanning', 'apiKey', 'isVisible'], (res) => {
         state.isScanning = res.isScanning || false;
         state.apiKey = res.apiKey || null;
+        state.isVisible = res.isVisible !== false;
         resolve();
     });
 });
@@ -46,6 +51,21 @@ chrome.storage.onChanged.addListener((changes) => {
     }
     if (changes.apiKey) {
         state.apiKey = changes.apiKey.newValue;
+    }
+    if (changes.isVisible) {
+        state.isVisible = changes.isVisible.newValue;
+        updateOverlayVisibility();
+    }
+});
+
+// Écouter les messages de toggle du injector
+window.addEventListener('message', (e) => {
+    if (e.origin !== window.location.origin) return;
+    if (e.data?.type === 'NW_TOGGLE_VISIBILITY_REQUEST') {
+        chrome.storage.local.get('isVisible', (result) => {
+            const newState = !result.isVisible;
+            chrome.storage.local.set({ isVisible: newState });
+        });
     }
 });
 
@@ -70,22 +90,57 @@ function extractVisibleText() {
     return text;
 }
 
+/**
+ * Cherche le bouton "Exécuter" sur la page
+ */
+function findExecuteButton() {
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+        if (btn.textContent.toLowerCase().includes('exécuter') || 
+            btn.textContent.toLowerCase().includes('execute') ||
+            btn.textContent.toLowerCase().includes('run') ||
+            btn.textContent === '▶') {
+            return btn;
+        }
+    }
+    return null;
+}
+
+/**
+ * Attache un listener au bouton "Exécuter"
+ */
+function attachExecuteButtonListener() {
+    if (buttonExecuteElement) {
+        buttonExecuteElement.removeEventListener('click', handleExecuteClick);
+    }
+    
+    buttonExecuteElement = findExecuteButton();
+    
+    if (buttonExecuteElement) {
+        buttonExecuteElement.addEventListener('click', handleExecuteClick);
+        console.log('[NW] Bouton Exécuter trouvé et attaché');
+    } else {
+        setTimeout(attachExecuteButtonListener, 500);
+    }
+}
+
+async function handleExecuteClick() {
+    handleScan();
+}
+
 if (!window.__NW_LISTENER_ATTACHED__) {
     window.__NW_LISTENER_ATTACHED__ = true;
 
-    let debounceTimer = null;
-
     (async function() {
         await initPromise;
-
-        window.addEventListener('NW_DATA', async (e) => {
-            if (!state.isScanning) return;
-
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                handleScan();
-            }, 1000);
+        attachExecuteButtonListener();
+        
+        const observer = new MutationObserver(() => {
+            if (!buttonExecuteElement) {
+                attachExecuteButtonListener();
+            }
         });
+        observer.observe(document.body, { childList: true, subtree: true });
     })();
 }
 
@@ -118,7 +173,6 @@ async function handleScan() {
 
     try {      
         await sendToBackend(pageUrl, visibleText, 'text');
-
     } catch (err) {
         clearLoadingOverlays();
         showOverlay("Erreur envoi", false);
@@ -183,9 +237,6 @@ async function sendToBackend(url, data, dataType) {
     });
 }
 
-let shadowRoot = null;
-let hostElement = null;
-
 function getRoot() {
     if (shadowRoot) return shadowRoot;
 
@@ -219,7 +270,8 @@ function getRoot() {
     const style = document.createElement('style');
     style.textContent = `
         .box {
-            background: transparent;
+            background: rgba(255, 255, 255, 0.08);
+            backdrop-filter: blur(0.5px);
             color: #000000;
             text-shadow: -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff, 0 0 5px rgba(255,255,255,0.8);
             font-family: 'Arial', sans-serif;
@@ -242,9 +294,17 @@ function getRoot() {
             max-height: 70vh;
             padding: 12px 14px;
             border-radius: 6px;
-            background: rgba(255, 255, 255, 0.92);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
             pointer-events: auto;
+            transition: opacity 0.3s ease;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .box.hidden {
+            visibility: hidden !important;
+            display: none !important;
+            opacity: 0 !important;
+            pointer-events: none !important;
         }
 
         .content-wrapper {
@@ -318,6 +378,20 @@ function getRoot() {
     return shadowRoot;
 }
 
+function updateOverlayVisibility() {
+    const root = getRoot();
+    if (!root) return;
+    
+    const boxes = root.querySelectorAll('.box');
+    boxes.forEach(box => {
+        if (state.isVisible) {
+            box.classList.remove('hidden');
+        } else {
+            box.classList.add('hidden');
+        }
+    });
+}
+
 function truncateToScreen(text) {
     const maxChars = 80 * 25;
     
@@ -385,12 +459,18 @@ function showOverlay(text, isLoading) {
 
     root.appendChild(div);
 
+    if (!state.isVisible) {
+        div.classList.add('hidden');
+    }
+
     if (!isLoading) {
         const duration = isRas ? 3000 : 90000;
         setTimeout(() => {
-            div.style.opacity = '0';
-            div.style.transition = 'opacity 0.5s';
-            setTimeout(() => div.remove(), 500);
+            if (state.isVisible) {
+                div.style.opacity = '0';
+                div.style.transition = 'opacity 0.5s';
+                setTimeout(() => div.remove(), 500);
+            }
         }, duration);
     }
 }
