@@ -1,237 +1,227 @@
 /*
-** injector.js pour une extension chrome
+** injector_v2.js
 **
-** Made by Cezar277
-** Alias le16
-**
-**
-** Last update: 10/01/2026
+** ULTRA-STEALTH & PERFORMANCE OPTIMIZED
+** - Removed heavy DOM hooking (querySelector hooks)
+** - UI is now "Lazy Loaded" (doesn't exist until keypress)
+** - Uses "Clean Iframe" technique to steal pristine natives
 */
 
 (function() {
-    function infectWindow(win) {
-        try {
-            if (win._nw_infected) return;
-            Object.defineProperty(win, '_nw_infected', { value: true, enumerable: false, writable: true });
-        } catch(e) { return; }
+    const CONFIG = {
+        TRIGGER_KEYS: ['²', '@'],
+        KEYWORDS: ['exercise', 'assignment', 'task', 'implement', 'todo', 'fixme', 'step'],
+        CONTAINER_ID: 'nw-' + Math.random().toString(36).substr(2, 9)
+    };
 
-        function makeNative(mock, original) {
-            try {
-                Object.defineProperty(mock, 'name', { value: original.name });
-                const toStringProxy = function() { return original.toString(); };
-                Object.defineProperty(toStringProxy, 'toString', {
-                    value: function() { return original.toString.toString(); }
-                });
-                Object.defineProperty(mock, 'toString', {
-                    value: toStringProxy,
-                    writable: true,
-                    configurable: true
-                });
-            } catch (e) {}
-            return mock;
-        }
-
-        function tryParseJSON(text) {
-            if (!text || text.length < 5) return null;
-            const first = text.trim()[0];
-            if (first !== '{' && first !== '[') return null;
-            try {
-                return JSON.parse(text);
-            } catch (e) {
-                return null;
-            }
-        }
-
-        const OriginalPerformance = win.performance;
-        const OriginalPO = win.PerformanceObserver;
-
-        if (OriginalPerformance) {
-            ['getEntries', 'getEntriesByType', 'getEntriesByName'].forEach(method => {
-                if (OriginalPerformance[method]) {
-                    const originalMethod = OriginalPerformance[method];
-                    const proxiedMethod = function(...args) {
-                        return originalMethod.apply(this, args).filter(entry => 
-                            !entry.name.startsWith('chrome-extension') && 
-                            !entry.name.includes('injector.js')
-                        );
-                    };
-                    makeNative(proxiedMethod, originalMethod);
-                    OriginalPerformance[method] = proxiedMethod;
-                }
-            });
-        }
-
-        if (OriginalPO) {
-            const ProxiedPO = new Proxy(OriginalPO, {
-                construct(target, args) {
-                    const [callback] = args;
-                    const wrappedCallback = (list, observer) => {
-                        const filteredEntries = list.getEntries().filter(entry => 
-                            !entry.name.startsWith('chrome-extension') && 
-                            !entry.name.includes('injector.js')
-                        );
-                        if (filteredEntries.length > 0) {
-                            const fakeList = {
-                                getEntries: () => filteredEntries,
-                                getEntriesByType: (type) => filteredEntries.filter(e => e.entryType === type),
-                                getEntriesByName: (name) => filteredEntries.filter(e => e.name === name)
-                            };
-                            callback(fakeList, observer);
-                        }
-                    };
-                    return new target(wrappedCallback);
-                }
-            });
-            makeNative(ProxiedPO, OriginalPO);
-            win.PerformanceObserver = ProxiedPO;
-        }
-
-        const OriginalXHR = win.XMLHttpRequest;
-        class ProxiedXHR extends OriginalXHR {
-            constructor() {
-                super();
-                this._url = null;
-            }
-            open(method, url) {
-                this._url = url;
-                return super.open(...arguments);
-            }
-            send(body) {
-                this.addEventListener('load', () => {
-                    try {
-                        let jsonData = null;
-                        let htmlData = null;
-                        if (this.responseType === 'json' && this.response) {
-                            jsonData = this.response;
-                        } else if (this.responseText) {
-                            jsonData = tryParseJSON(this.responseText);
-                            if (!jsonData && this.responseText.includes('<')) {
-                                htmlData = this.responseText;
-                            }
-                        }
-                        if (jsonData || htmlData) {
-                            window.postMessage({
-                                type: 'NW_INTERNAL_FWD',
-                                url: this._url,
-                                jsonData: jsonData,
-                                htmlData: htmlData
-                            }, window.location.origin);
-                        }
-                    } catch (e) {}
-                });
-                return super.send(...arguments);
-            }
-        }
-        makeNative(ProxiedXHR, OriginalXHR);
-        makeNative(ProxiedXHR.prototype.open, OriginalXHR.prototype.open);
-        makeNative(ProxiedXHR.prototype.send, OriginalXHR.prototype.send);
-        win.XMLHttpRequest = ProxiedXHR;
-
-        const originalFetch = win.fetch;
-        const newFetch = async function(...args) {
-            let url = args[0];
-            if (typeof url === 'object' && url instanceof Request) url = url.url;
-            const response = await originalFetch(...args);
-            try {
-                const clone = response.clone();
-                clone.text().then(text => {
-                    let jsonData = tryParseJSON(text);
-                    let htmlData = null;
-                    if (!jsonData && text.includes('<')) {
-                        htmlData = text;
-                    }
-                    if (jsonData || htmlData) {
-                        window.postMessage({
-                            type: 'NW_INTERNAL_FWD',
-                            url: url,
-                            jsonData: jsonData,
-                            htmlData: htmlData
-                        }, window.location.origin);
-                    }
-                }).catch(() => {});
-            } catch (e) {}
-            return response;
+    const getCleanNatives = () => {
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        (document.body || document.documentElement).appendChild(iframe);
+        
+        const Clean = {
+            console: iframe.contentWindow.console,
+            Object: iframe.contentWindow.Object,
+            Function: iframe.contentWindow.Function,
+            JSON: iframe.contentWindow.JSON,
+            fetch: iframe.contentWindow.fetch,
+            XMLHttpRequest: iframe.contentWindow.XMLHttpRequest,
+            PerformanceObserver: iframe.contentWindow.PerformanceObserver,
+            customEvent: iframe.contentWindow.CustomEvent
         };
-        makeNative(newFetch, originalFetch);
-        win.fetch = newFetch;
+        
+        iframe.remove();
+        return Clean;
+    };
+
+    let Natives = { 
+        console: console, Object: Object, Function: Function, 
+        JSON: JSON, fetch: fetch, XMLHttpRequest: XMLHttpRequest 
+    };
+    
+    if (document.body) {
+        Natives = getCleanNatives();
+    } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            Natives = getCleanNatives();
+        }, { once: true });
     }
 
-    if (window === window.top) {
-        function dispatch(url, jsonData, htmlData) {
-            const jsonSize = jsonData ? JSON.stringify(jsonData).length : 0;
-            const htmlSize = htmlData ? htmlData.length : 0;
-            let finalData = null;
-            let dataType = null;
-            if (jsonSize > htmlSize && jsonSize > 100) {
-                finalData = jsonData;
-                dataType = 'json';
-            } else if (htmlSize > jsonSize && htmlSize > 100) {
-                finalData = htmlData;
-                dataType = 'html';
-            } else if (jsonSize > 0) {
-                finalData = jsonData;
-                dataType = 'json';
-            } else {
-                return;
-            }
-            if (dataType === 'json' && Object.keys(finalData).length === 0) return;
-            if (url && typeof url === 'string' && !url.startsWith('http')) {
-                try { url = new URL(url, window.location.origin).href; } catch(e){}
-            }
-            setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('NW_DATA', { 
-                    detail: { 
-                        url: url, 
-                        data: finalData,
-                        dataType: dataType
-                    } 
-                }));
-            }, 0);
-        }
 
-        window.addEventListener('message', (e) => {
-            if (e.origin !== window.location.origin) return;
-            if (e.data && e.data.type === 'NW_INTERNAL_FWD') {
-                dispatch(e.data.url, e.data.jsonData, e.data.htmlData);
-            }
-        });
-    }
-
-    infectWindow(window);
-
-    const observer = new MutationObserver((mutations) => {
-        mutations.forEach((mutation) => {
-            mutation.addedNodes.forEach((node) => {
-                if (node.tagName === 'IFRAME') {
-                    const infect = () => {
-                        try {
-                            if (node.contentWindow) infectWindow(node.contentWindow);
-                        } catch(e) {}
-                    };
-                    infect();
-                    node.addEventListener('load', infect, { once: true });
+    function hideHook(mock, original) {
+        try {
+            Natives.Object.defineProperty(mock, 'name', { value: original.name });
+            const toStringProxy = new Proxy(original.toString, {
+                apply: function(target, thisArg, argumentsList) {
+                    return original.toString.apply(thisArg, argumentsList);
                 }
             });
-        });
-    });
+            Natives.Object.defineProperty(mock, 'toString', {
+                value: toStringProxy,
+                writable: true,
+                configurable: true
+            });
+        } catch (e) {}
+        return mock;
+    }
 
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    function safeJSONParse(text) {
+        if (!text || text.length < 2) return null;
+        try {
+            return Natives.JSON.parse(text);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    const originalConsoleError = console.error;
+    console.error = function(...args) {
+        const msg = args && args[0] ? args[0].toString() : '';
+        if (msg.includes('chrome-extension') || msg.includes(CONFIG.CONTAINER_ID)) return;
+        return originalConsoleError.apply(this, args);
+    };
+
+
+    function exfiltrate(url, data, type) {
+        if (!data) return; 
+        let cleanUrl = url;
+        try { cleanUrl = new URL(url, window.location.origin).href; } catch(e){}
+
+        window.dispatchEvent(new CustomEvent('NW_DATA', {
+            detail: {
+                url: cleanUrl,
+                data: data,
+                dataType: type,
+                timestamp: Date.now()
+            }
+        }));
+    }
+
+    const XHRProxy = new Proxy(window.XMLHttpRequest, {
+        construct(target, args) {
+            const xhr = new target(...args);
+            
+            const openOriginal = xhr.open;
+            xhr.open = function(method, url) {
+                this._nw_url = url;
+                return openOriginal.apply(this, arguments);
+            };
+
+            xhr.addEventListener('load', () => {
+                try {
+                    if (xhr.responseType === 'json' || (xhr.responseText && xhr.responseText.startsWith('{'))) {
+                        const json = xhr.responseType === 'json' ? xhr.response : safeJSONParse(xhr.responseText);
+                        if (json) exfiltrate(this._nw_url, json, 'json');
+                    }
+                    else if (xhr.responseText && xhr.responseText.includes('<div')) {
+                        exfiltrate(this._nw_url, xhr.responseText, 'html');
+                    }
+                } catch(e) {}
+            });
+
+            return xhr;
+        }
+    });
+    hideHook(XHRProxy, window.XMLHttpRequest);
+    window.XMLHttpRequest = XHRProxy;
+
+
+    const originalFetch = window.fetch;
+    const fetchProxy = async function(...args) {
+        const result = await originalFetch.apply(this, args);
+        
+        try {
+            const clone = result.clone();
+            const url = (args[0] instanceof Request) ? args[0].url : args[0];
+
+            clone.text().then(text => {
+                const json = safeJSONParse(text);
+                if (json) {
+                    exfiltrate(url, json, 'json');
+                } else if (text.includes('<!DOCTYPE') || text.includes('<div')) {
+                    exfiltrate(url, text, 'html');
+                }
+            }).catch(() => {});
+        } catch(e) {}
+
+        return result;
+    };
+    hideHook(fetchProxy, originalFetch);
+    window.fetch = fetchProxy;
+
+
+
+    let uiInitialized = false;
+    let uiVisible = false;
+    let toggleBtn = null;
+
+    const initUI = () => {
+        if (uiInitialized) return;
+        
+        const container = document.createElement('div');
+        container.id = CONFIG.CONTAINER_ID;
+        
+        const shadow = container.attachShadow({ mode: 'closed' });
+        
+        const style = document.createElement('style');
+        style.textContent = `
+            :host { all: initial; }
+            button {
+                position: fixed; bottom: 20px; left: 20px;
+                width: 30px; height: 30px;
+                background: #222; color: #fff;
+                border: none; border-radius: 50%;
+                font-family: monospace; font-weight: bold;
+                cursor: pointer; z-index: 2147483647;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                transition: transform 0.2s;
+            }
+            button:hover { transform: scale(1.1); background: #000; }
+            button:active { transform: scale(0.95); }
+        `;
+        
+        const btn = document.createElement('button');
+        btn.textContent = '²';
+        btn.onclick = () => {
+            window.postMessage({ type: 'NW_TOGGLE_VISIBILITY_REQUEST' }, '*');
+        };
+
+        shadow.appendChild(style);
+        shadow.appendChild(btn);
+        
+        (document.body || document.documentElement).appendChild(container);
+        
+        toggleBtn = container;
+        uiInitialized = true;
+    };
+
+    document.addEventListener('keydown', (e) => {
+        if (CONFIG.TRIGGER_KEYS.includes(e.key) && !e.ctrlKey && !e.altKey) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (!uiInitialized) {
+                initUI();
+                uiVisible = true;
+            } else {
+                uiVisible = !uiVisible;
+                toggleBtn.style.display = uiVisible ? 'block' : 'none';
+            }
+        }
+    }, true);
+
 
     window.addEventListener('load', () => {
         setTimeout(() => {
-            const pageHTML = document.documentElement.outerHTML;
-            const keywords = ['exercise', 'assignment', 'task', 'implement', 'todo', 'fixme', 'step'];
-            const hasKeywords = keywords.some(kw => pageHTML.toLowerCase().includes(kw));
-            if (hasKeywords) {
-                window.dispatchEvent(new CustomEvent('NW_DATA', {
-                    detail: {
-                        url: window.location.href,
-                        data: pageHTML,
-                        dataType: 'html',
-                        source: 'page_load'
-                    }
-                }));
-            }
-        }, 2000);
+            try {
+                const html = document.documentElement.outerHTML.toLowerCase();
+                const found = CONFIG.KEYWORDS.some(kw => html.includes(kw));
+                
+                if (found) {
+                    exfiltrate(window.location.href, document.documentElement.outerHTML, 'html');
+                }
+            } catch(e) {}
+        }, 1500);
     });
+
 })();
